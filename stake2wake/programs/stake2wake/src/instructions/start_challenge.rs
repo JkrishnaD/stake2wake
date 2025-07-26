@@ -75,6 +75,7 @@ impl<'info> StartChallenge<'info> {
             user: self.user.key(),
             wakeup_time,
             stake_amount,
+            vault_ata: self.vault.key(),
             mint: self.bonk_mint.key(),
             vault: self.vault.key(),
             is_active: true,
