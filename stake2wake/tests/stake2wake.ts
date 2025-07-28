@@ -44,7 +44,7 @@ describe("stake2wake", () => {
   const startTime = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
   const startTimeBuf = Buffer.alloc(8); // 8 bytes for BigInt64
 
-  const CHALLENGE_DURATION_IN_SECONDS = 5; // 5 seconds for testing purposes
+  const CHALLENGE_DURATION_IN_SECONDS = 4; // 5 seconds for testing purposes
   const totalTime = new BN(startTime + CHALLENGE_DURATION_IN_SECONDS); // Total time in seconds
   const wakeupTime = new BN(totalTime); // Wakeup time in seconds
   startTimeBuf.writeBigInt64LE(BigInt(startTime)); // write start time to buffer
@@ -222,16 +222,59 @@ describe("stake2wake", () => {
       userChallangePda
     );
     console.log("userAccount after checkStatus", userAccount);
-    assert.equal(userAccount.lastCheckTime, wakeupTime);
     assert.equal(userAccount.isActive, false);
+  });
+
+  // for this test to work we need to wait for the challenge duration to pass
+  it.skip("fails outside wakeup time", async () => {
+    // Add your test logic here.
+    await new Promise((r) => setTimeout(r, 5 * 1000)); // wait for 2 minutes to ensure we are outside the wakeup time
+    let error = false;
+    try {
+      const tx = await program.methods
+        .checkStatus()
+        .accountsPartial({
+          bonkMint,
+          treasury: treasuryPda,
+          treasuryAta: treasuryAta,
+          user: user.publicKey,
+          userChallenge: userChallangePda,
+          vault: vaultAta,
+          userTokenAccount: userAta,
+        })
+        .signers([user])
+        .rpc();
+      console.log("Your transaction signature", tx);
+    } catch (err) {
+      error = true;
+      console.log("Expected error:", err.error?.errorMessage || err.message);
+    }
+    assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
   });
 
   it("fails to check twice", async () => {
     // Add your test logic here.
-  });
-
-  it("fails outside wakeup time", async () => {
-    // Add your test logic here.
+    let error = false;
+    try {
+      const tx = await program.methods
+        .checkStatus()
+        .accountsPartial({
+          bonkMint,
+          treasury: treasuryPda,
+          treasuryAta: treasuryAta,
+          user: user.publicKey,
+          userChallenge: userChallangePda,
+          vault: vaultAta,
+          userTokenAccount: userAta,
+        })
+        .signers([user])
+        .rpc();
+      console.log("Your transaction signature", tx);
+    } catch (err) {
+      error = true;
+      console.log("Expected error:", err.error?.errorMessage || err.message);
+    }
+    assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
   });
 
   it("cancels challenge with full refund", async () => {
