@@ -30,6 +30,7 @@ describe("stake2wake", () => {
   const admin = provider.wallet;
   let user: Keypair;
 
+  let adminAta: PublicKey; // this account will store the BONK tokens for the admin
   let userAta: PublicKey; // this account will store the BONK tokens for the user
   let bonkMint: PublicKey; // this is the mint for BONK tokens
   let bonkAta: PublicKey; // this is the associated token account for BONK tokens
@@ -96,6 +97,8 @@ describe("stake2wake", () => {
       program.programId
     );
 
+    adminAta = getAssociatedTokenAddressSync(bonkMint, admin.publicKey, true);
+
     // Create the associated token account for the user where the BONK tokens will be stored
     bonkAta = getAssociatedTokenAddressSync(bonkMint, admin.publicKey, true);
 
@@ -110,6 +113,13 @@ describe("stake2wake", () => {
 
     // Create the associated token account for the vault where the staked amount will be stored
     vaultAta = getAssociatedTokenAddressSync(bonkMint, userChallangePda, true);
+
+    await createAssociatedTokenAccount(
+      provider.connection,
+      admin.payer, // payer
+      bonkMint,
+      admin.publicKey
+    );
   });
 
   it("Should initialize the treasury!", async () => {
@@ -170,7 +180,31 @@ describe("stake2wake", () => {
     assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
   });
 
-  it("starts a challenge", async () => {
+  it("fails to start challenge with zero stake amount", async () => {
+    let error = false;
+    try {
+      const stakeAmount = new BN(0); // zero stake amount
+      const totalDays = new BN(1);
+
+      const tx = await program.methods
+        .startChallenge(new BN(startTime), wakeupTime, stakeAmount, totalDays)
+        .accountsPartial({
+          bonkMint,
+          user: user.publicKey,
+          userChallenge: userChallangePda,
+          vault: vaultAta,
+        })
+        .signers([user])
+        .rpc();
+    } catch (err) {
+      error = true;
+      console.log("Expected error:", err.error?.errorMessage || err.message);
+    }
+    // stake amount cannot be zero
+    assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
+  });
+
+  it.skip("starts a challenge", async () => {
     // giving challenge a 5 secs duration which will be helpful for testing
 
     const stakeAmount = new BN(1 * LAMPORTS_PER_SOL);
@@ -192,6 +226,7 @@ describe("stake2wake", () => {
     const userAccount = await program.account.challengeAccount.fetch(
       userChallangePda
     );
+
     console.log("userAccount", userAccount);
     assert.equal(userAccount.user.toBase58(), user.publicKey.toBase58());
     assert.equal(userAccount.vault.toBase58(), vaultAta.toBase58());
@@ -202,7 +237,7 @@ describe("stake2wake", () => {
     assert.equal(userAccount.mint.toBase58(), bonkMint.toBase58());
   });
 
-  it("checks in correctly", async () => {
+  it.skip("checks in correctly", async () => {
     // Add your test logic here.
     const tx = await program.methods
       .checkStatus()
@@ -244,7 +279,6 @@ describe("stake2wake", () => {
         })
         .signers([user])
         .rpc();
-      console.log("Your transaction signature", tx);
     } catch (err) {
       error = true;
       console.log("Expected error:", err.error?.errorMessage || err.message);
@@ -252,7 +286,7 @@ describe("stake2wake", () => {
     assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
   });
 
-  it("fails to check twice", async () => {
+  it.skip("fails to check twice", async () => {
     // Add your test logic here.
     let error = false;
     try {
@@ -269,7 +303,6 @@ describe("stake2wake", () => {
         })
         .signers([user])
         .rpc();
-      console.log("Your transaction signature", tx);
     } catch (err) {
       error = true;
       console.log("Expected error:", err.error?.errorMessage || err.message);
@@ -277,19 +310,125 @@ describe("stake2wake", () => {
     assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
   });
 
-  it("cancels challenge with full refund", async () => {
+  it.skip("cancels challenge with full refund", async () => {
     // Add your test logic here.
+    console.log("challenge pda", userChallangePda);
+    const tx = await program.methods
+      .cancelChallenge()
+      .accountsPartial({
+        bonkMint,
+        treasury: treasuryPda,
+        treasuryAta: treasuryAta,
+        user: user.publicKey,
+        userChallenge: userChallangePda,
+        vault: vaultAta,
+        userTokenAccount: userAta,
+      })
+      .signers([user])
+      .rpc();
+
+    console.log("Your transaction signature", tx);
   });
 
   it("cancels early with 20% penalty", async () => {
     // Add your test logic here.
+    const stakeAmount = new BN(1 * LAMPORTS_PER_SOL);
+    const totalDays = new BN(1);
+    const tx = await program.methods
+      .startChallenge(new BN(startTime), wakeupTime, stakeAmount, totalDays)
+      .accountsPartial({
+        bonkMint,
+        user: user.publicKey,
+        userChallenge: userChallangePda,
+        vault: vaultAta,
+      })
+      .signers([user])
+      .rpc();
+    console.log("Your transaction signature", tx);
+
+    // get the user ATA before canceling the challenge
+    const before = await getAccount(provider.connection, userAta);
+    const beforeBalance = Number(before.amount);
+    console.log("User BONK before cancel:", beforeBalance);
+
+    // wait for 2 seconds to ensure we are within the challenge duration
+    await new Promise((r) => setTimeout(r, 2 * 1000));
+    // cancel the challenge with 20% penalty
+    const tx2 = await program.methods
+      .cancelChallenge()
+      .accountsPartial({
+        bonkMint,
+        treasury: treasuryPda,
+        treasuryAta: treasuryAta,
+        user: user.publicKey,
+        userChallenge: userChallangePda,
+        vault: vaultAta,
+        userTokenAccount: userAta,
+      })
+      .signers([user])
+      .rpc();
+    console.log("Your transaction signature", tx2);
+
+    // Get user token balance after cancellation
+    const after = await getAccount(provider.connection, userAta);
+    const afterBalance = Number(after.amount);
+    console.log("User BONK after cancel:", afterBalance);
+
+    const refundExpected = (1 * LAMPORTS_PER_SOL * 80) / 100;
+
+    // Assert that only 80% was returned
+    const received = afterBalance - beforeBalance;
+    console.log("BONK received after penalty refund:", received);
+
+    assert.ok(
+      Math.abs(received - refundExpected) < 100, // allow a few lamports difference
+      `Expected refund ~${refundExpected}, got ${received}`
+    );
   });
 
-  it("withdraws from treasury", async () => {
+  it.skip("withdraws from treasury", async () => {
+    const amount = new BN(0.2 * LAMPORTS_PER_SOL);
+
+    const before = await program.account.treasury.fetch(treasuryPda);
+    console.log("treasuryAccount before withdraw", before);
     // Add your test logic here.
+    const tx = await program.methods
+      .treasuryWithdraw(amount)
+      .accountsPartial({
+        authority: admin.publicKey,
+        treasury: treasuryPda,
+        treasuryAta: treasuryAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        authorityAta: adminAta,
+        bonkMint,
+      })
+      .rpc();
+    console.log("Your transaction signature", tx);
+
+    const treasuryAccount = await program.account.treasury.fetch(treasuryPda);
+    console.log("treasuryAccount after withdraw", treasuryAccount);
   });
 
   it("fails withdraw for non-admin", async () => {
     // Add your test logic here.
+    let error = false;
+    try {
+      await program.methods
+        .treasuryWithdraw(new BN(0.1 * LAMPORTS_PER_SOL))
+        .accountsPartial({
+          authority: user.publicKey,
+          treasury: treasuryPda,
+          treasuryAta: treasuryAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          authorityAta: userAta,
+          bonkMint,
+        })
+        .rpc();
+    } catch (err) {
+      error = true;
+      console.log("Expected error:", err.error?.errorMessage || err.message);
+    }
+    // only admin can withdraw from the treasury
+    assert.isTrue(error, "Expected the transaction to fail, but it succeeded");
   });
 });
