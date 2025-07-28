@@ -2,12 +2,12 @@ use anchor_lang::prelude::*;
 
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{ transfer_checked, Token, TokenAccount, TransferChecked },
+    token::{transfer_checked, Token, TokenAccount, TransferChecked},
     token_interface::Mint,
 };
 
-use crate::state::{ ChallengeAccount, Treasury };
 use crate::error::Stake2WakeError;
+use crate::state::{ChallengeAccount, Treasury};
 
 #[derive(Accounts)]
 pub struct CheckStatus<'info> {
@@ -35,7 +35,7 @@ pub struct CheckStatus<'info> {
     #[account(
         mut,
         associated_token::mint = bonk_mint,
-        associated_token::authority = user // authority is the user who is checking the challenge
+        associated_token::authority = user_challenge // authority is the user who is checking the challenge
     )]
     pub vault: Account<'info, TokenAccount>,
 
@@ -66,13 +66,25 @@ impl<'info> CheckStatus<'info> {
 
         require!(challenge.is_active, Stake2WakeError::InactiveChallenge); // checks if the challenge is active or not
 
-        let current_day = (now - challenge.start_time) / 86400; // gets the current day since the challenge started
-        let last_checked_day = (challenge.last_check_time - challenge.start_time) / 86400; // it gets when the user checked the challenge last time
+        challenge.last_check_time = 0;
+        let current_day = now.saturating_sub(challenge.start_time) / 86400; // gets the current day since the challenge started
 
-        require!(current_day > last_checked_day, Stake2WakeError::AlreadyCheckedInToday); // checks if the user already checked
+        let first_check_in = challenge.last_check_time == 0;
+
+        if !first_check_in {
+            let last_checked_day = challenge
+                .last_check_time
+                .saturating_sub(challenge.start_time)
+                / 86400;
+
+            require!(
+                current_day > last_checked_day,
+                Stake2WakeError::AlreadyCheckedInToday
+            );
+        }
 
         let seconds_from_midnight = now % 86400; // days starts from midnight so it gets the time from midnight in seconds
-        let extra_time = 15 * 60; // extra time given to the user to check in
+        let extra_time = 5 * 60; // extra time given to the user to check in
 
         let min_wake = seconds_from_midnight.saturating_sub(extra_time); // extra time before given wakeup time
         let max_wake = challenge.wakeup_time + extra_time; // extra time after the wakeup time
